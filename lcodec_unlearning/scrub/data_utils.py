@@ -16,9 +16,10 @@ import copy
 import numpy as np
 import torch.utils.data
 from torch.utils.data import Subset
-from torchvision.transforms import Compose, ToTensor, Normalize, Resize, RandomCrop, RandomHorizontalFlip
+from torchvision.transforms import Compose, ToTensor, Normalize, Resize, RandomCrop, RandomHorizontalFlip, AutoAugmentPolicy
+from torchvision.transforms.v2 import ToImage, ToDtype, AutoAugment
 
-from dataset import MRLeye
+from lcodec_unlearning.scrub.dataset import MRLeye
 
 
 def getDatasets(name='mnist', val_also=True, include_indices=None, exclude_indices=None, data_augment=False):
@@ -55,24 +56,37 @@ def getDatasets(name='mnist', val_also=True, include_indices=None, exclude_indic
 
         if data_augment:
             print("Doing data augmentation")
-            train_transformation = Compose(
-                [
-                    RandomCrop(32, padding=4),
-                    RandomHorizontalFlip(),
-                    ToTensor(),
-                    Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-                ]
-            )
-        else:
+            # train_transformation = Compose(
+            #     [
+            #         RandomCrop(32, padding=4),
+            #         RandomHorizontalFlip(),
+            #         ToTensor(),
+            #         Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            #     ]
+            # )
             train_transformation = Compose([
-                ToTensor(),
-                Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                ToImage(),
+                AutoAugment(policy=AutoAugmentPolicy.CIFAR10),
+                ToDtype(torch.float32, scale=True),
+            ])
+        else:
+            # train_transformation = Compose([
+            #     ToTensor(),
+            #     Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            # ])
+            train_transformation = Compose([
+                ToImage(),
+                ToDtype(torch.float32, scale=True),
             ])
 
+        # val_transformation = Compose([
+        #         ToTensor(),
+        #         Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        #     ])
         val_transformation = Compose([
-                ToTensor(),
-                Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-            ])
+            ToImage(),
+            ToDtype(torch.float32, scale=True),
+        ])
         
         train_dataset = CIFAR10(root='./data', train=True, download=True, transform=train_transformation)
         

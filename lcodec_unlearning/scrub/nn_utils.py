@@ -3,7 +3,7 @@ import numpy as np
 import random
 from tqdm import tqdm
 
-from grad_utils import getGradObjs, gradNorm
+from lcodec_unlearning.scrub.grad_utils import getGradObjs, gradNorm
 
 
 def do_epoch(model, dataloader, criterion, epoch, nepochs, optim=None, device='cpu', outString='', compute_grads=False, retrain=False):

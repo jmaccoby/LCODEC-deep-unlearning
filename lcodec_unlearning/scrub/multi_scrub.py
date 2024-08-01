@@ -10,39 +10,95 @@ from tqdm import tqdm
 
 import time
 
-from data_utils import getDatasets
-from nn_utils import do_epoch, manual_seed
+from lcodec_unlearning.scrub.data_utils import getDatasets
+from lcodec_unlearning.scrub.nn_utils import do_epoch, manual_seed
 
-from scrub_tools import scrubSample, inp_perturb
+from lcodec_unlearning.scrub.scrub_tools import scrubSample, inp_perturb
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def scrubMany(args):
+def scrubMany(
+        dataset='cifar10',
+        model_class=None,
+        model_type='resnet',
+        model_args={},
+        train_epochs=10,
+        interp_size=32,
+        # scrub_index=None,
+        n_removals=10000,
+        orig_trainset_size=None,
+        epsilon=0.1,
+        delta=0.01,
+        l2_reg=0.001,
+        lr=1.0,
+        batch_size=128,
+        scrubType='IP',
+        HessType='Sekhari',
+        approxType='FD',
+        n_perturbations=1000,
+        order='Hessian',
+        selectionType='FOCI',
+        FOCIType='full',
+        cheap_foci_thresh=0.05,
+        run=1,
+        outfile='scrub_ablate_results.csv',
+        updatemodelname=None,
+        hessian_device='cpu',
+        val_gap_skip=0.05,
+        scrub_batch_size=None,
+        removal_class=0,
+        train_lr=0.0001,
+        train_wd=0.01,
+        train_bs=32,
+        train_optim='sgd',
+        data_augment=0
+        ):
 
     # outString = 'trained_models/'+args.dataset+"_"+args.model+'_epochs_' + str(args.train_epochs)
-    outString = 'trained_models/'+args.dataset+"_"+args.model+'_epochs_' + str(args.train_epochs)+'_lr_' + str(args.train_lr)+'_wd_' + str(args.train_wd)+'_bs_' + str(args.train_bs)+'_optim_' + str(args.train_optim)
-    if args.data_augment:
+    outString = 'trained_models/'+dataset+"_"+model_type+'_epochs_' + str(train_epochs)+'_lr_' + str(train_lr)+'_wd_' + str(train_wd)+'_bs_' + str(train_bs)+'_optim_' + str(train_optim)
+    if data_augment:
         outString = outString + "_transform"
     else:
         outString = outString + "_notransform"
     
     tmp = {}
-    tmp['dataset'] = [args.dataset]
-    tmp['model'] = [args.model]
-    tmp['train_epochs'] = [args.train_epochs]
-    tmp['selectionType'] = [args.selectionType]
-    tmp['order'] = [args.order]
-    tmp['HessType'] = [args.HessType]
-    tmp['approxType'] = [args.approxType]
-    tmp['run'] = [args.run]
-    tmp['orig_trainset_size'] = [args.orig_trainset_size]
-    tmp['delta'] = [args.delta]
-    tmp['epsilon'] = [args.epsilon]
-    tmp['l2_reg'] = [args.l2_reg]
+    tmp['dataset'] = [dataset]
+    tmp['model'] = [model_type]
+    tmp['train_epochs'] = [train_epochs]
+    tmp['selectionType'] = [selectionType]
+    tmp['order'] = [order]
+    tmp['HessType'] = [HessType]
+    tmp['approxType'] = [approxType]
+    tmp['run'] = [run]
+    tmp['orig_trainset_size'] = [orig_trainset_size]
+    tmp['delta'] = [delta]
+    tmp['epsilon'] = [epsilon]
+    tmp['l2_reg'] = [l2_reg]
+
+    class C:
+        pass
 
 
-    exec("from models import %s" % args.model)
-    model = eval(args.model)().to(device)
+    perturb_args = C()
+    perturb_args.scrub_batch_size = scrub_batch_size
+    perturb_args.n_perturbations = n_perturbations
+    perturb_args.selectionType = selectionType
+    perturb_args.FOCIType = FOCIType
+    perturb_args.order = order
+    perturb_args.train_epochs = train_epochs
+    perturb_args.approxType = approxType
+    perturb_args.hessian_device = hessian_device
+    perturb_args.orig_trainset_size = orig_trainset_size
+    perturb_args.l2_reg = l2_reg
+    perturb_args.epsilon = epsilon
+    perturb_args.delta = delta
+    perturb_args.HessType = HessType
+    perturb_args.lr = lr
+
+
+
+    # exec("from models import %s" % model)
+    model = model_class(**model_args).to(device)
 
     print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters())/1000000.0))
 
@@ -51,17 +107,17 @@ def scrubMany(args):
 
     criterion = torch.nn.CrossEntropyLoss()
 
-    ordering = np.random.permutation(args.orig_trainset_size)
-    full_dataset, val_dataset = getDatasets(name=args.dataset, data_augment=False)
+    ordering = np.random.permutation(orig_trainset_size)
+    full_dataset, val_dataset = getDatasets(name=dataset, data_augment=False)
     scrubbed_list = []
         
     print('Validation Set Size: ', len(val_dataset))
 
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size,
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size,
                                                  shuffle=False, num_workers=1)
     with torch.no_grad():
         val_loss, val_accuracy = do_epoch(model, val_loader, criterion, 0, 0, optim=None, device=device)
-        print(f'Model:{args.model} Before: val_loss={val_loss:.4f}, val_accuracy={val_accuracy:.4f}')
+        print(f'Model:{model_type} Before: val_loss={val_loss:.4f}, val_accuracy={val_accuracy:.4f}')
 
         tmp['val_acc_before'] = [val_accuracy]
         tmp['val_loss_before'] = [val_loss]
@@ -70,17 +126,17 @@ def scrubMany(args):
 
     i = 0
     j = 0
-    while i < args.n_removals:
-    #for i in range(args.n_removals):
+    while i < n_removals:
+    #for i in range(n_removals):
         print ('######################## GPU Memory Allocated {} MB'.format(torch.cuda.memory_allocated(device=device)/1024./1024.))
 
-        if args.scrub_batch_size is not None:
+        if scrub_batch_size is not None:
 
             # select samples to scrub
             scrub_list = []
-            while len(scrub_list) < args.scrub_batch_size and (i+len(scrub_list)) < args.n_removals:
+            while len(scrub_list) < scrub_batch_size and (i+len(scrub_list)) < n_removals:
                 scrubee = ordering[j]
-                if full_dataset[scrubee][1] == args.removal_class:
+                if full_dataset[scrubee][1] == removal_class:
                     scrub_list.append(scrubee)
                 j += 1
 
@@ -96,8 +152,8 @@ def scrubMany(args):
         #scrubbed_list.append(scrubee)
         scrubbed_list.extend(scrub_list)
 
-        residual_dataset, _ = getDatasets(name=args.dataset, val_also=False, exclude_indices=scrubbed_list)
-        residual_loader = torch.utils.data.DataLoader(residual_dataset, batch_size=args.batch_size,
+        residual_dataset, _ = getDatasets(name=dataset, val_also=False, exclude_indices=scrubbed_list)
+        residual_loader = torch.utils.data.DataLoader(residual_dataset, batch_size=batch_size,
                                                  shuffle=False, num_workers=1)
         
         print('Residual dataset size: ', len(residual_dataset))
@@ -111,20 +167,20 @@ def scrubMany(args):
 
         # loops once for now, maybe more in future
         foci_val = 1
-        while foci_val > args.cheap_foci_thresh:
+        while foci_val > cheap_foci_thresh:
 
             prev_statedict_fname = outString + '_prevSD.pt'
             torch.save(model.state_dict(), prev_statedict_fname)
 
             # because we reload the model
-            optim = torch.optim.SGD(model.parameters(), lr=args.lr)
+            optim = torch.optim.SGD(model.parameters(), lr=lr)
 
-            foci_val, updatedSD, samplossbefore, samplossafter, gradnormbefore, gradnormafter = inp_perturb(model, scrub_dataset, criterion, args, optim, device, outString=outString)
+            foci_val, updatedSD, samplossbefore, samplossafter, gradnormbefore, gradnormafter = inp_perturb(model, scrub_dataset, criterion, perturb_args, optim, device, outString=outString)
 
             # reload for deepcopy
             # apply new weights
             # without this cannot deepcopy later
-            model = eval(args.model)().to(device)
+            model = model_class(**model_args).to(device)
             model.load_state_dict(updatedSD)
 
             # for future
@@ -140,9 +196,9 @@ def scrubMany(args):
             print(f'\t New Val Acc: {val_accuracy}')
 
 
-            if prev_val_acc - val_accuracy > args.val_gap_skip:
+            if prev_val_acc - val_accuracy > val_gap_skip:
                 print('########## BAD SAMPLE BATCH DETECTED, REVERTING MODEL #######')
-                model = eval(args.model)().to(device)
+                model = model_class(**model_args).to(device)
                 model.load_state_dict(torch.load(prev_statedict_fname))
                 tmp['bad_sample'] = 1
             else:
@@ -169,10 +225,10 @@ def scrubMany(args):
             tmp['residual_gradnorm_after'] = [resid_gradnorm]
 
             df = pd.DataFrame(tmp)
-            if os.path.isfile(args.outfile):
-                df.to_csv(args.outfile, mode='a', header=False, index=False)
+            if os.path.isfile(outfile):
+                df.to_csv(outfile, mode='a', header=False, index=False)
             else:
-                df.to_csv(args.outfile, mode='a', header=True, index=False)
+                df.to_csv(outfile, mode='a', header=True, index=False)
 
             
     return model

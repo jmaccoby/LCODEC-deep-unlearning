@@ -17,13 +17,13 @@ import torchvision.transforms as transforms
 import torchvision
 from tqdm import tqdm
 
-from hypercolumn import HyperC, ActivationsHook, NLP_ActivationsHook
-from grad_utils import getGradObjs, gradNorm, getHessian, getVectorizedGrad, getOldPandG
+from lcodec_unlearning.scrub.hypercolumn import HyperC, ActivationsHook, NLP_ActivationsHook
+from lcodec_unlearning.scrub.grad_utils import getGradObjs, gradNorm, getHessian, getVectorizedGrad, getOldPandG
 
 import sys
 sys.path.append('..')
 #from codec import foci, cheap_foci
-from codec import torch_foci as foci
+from lcodec_unlearning.codec import torch_foci as foci
 
 def DisableBatchNorm(model):
     for name ,child in (model.named_children()):
@@ -195,6 +195,7 @@ def inp_perturb(model, dataset, criterion, params, optim, device, outString, is_
 
     acts = torch.vstack(activations)
     losses = torch.Tensor(losses).to(device)
+
 
     # descructor is not called on return for this
     # call it manually

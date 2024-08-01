@@ -23,7 +23,7 @@ def codec2(Z, Y):
     tmpR = torch.arange(n)
     R[p] = tmpR + 1
 
-    RM = R[M]
+    RM = R[M.cpu()]
     minRM = n*torch.minimum(R, RM)
 
     L = (n+1) - R
@@ -59,8 +59,8 @@ def codec3(Z, Y, X):
     tmpR = torch.arange(n)
     R[p] = tmpR + 1
 
-    RM = R[M]
-    RN = R[N]
+    RM = R[M.cpu()]
+    RN = R[N.cpu()]
     minRM = torch.minimum(R,RM)
     minRN = torch.minimum(R,RN)    
 
